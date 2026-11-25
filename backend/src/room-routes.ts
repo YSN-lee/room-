@@ -13,6 +13,7 @@ import {
 import {
   authenticateMember1,
   type RoomLifecycleService,
+  type RoomSnapshot,
 } from "./room-lifecycle.js";
 
 function authenticatedUserId(res: Response): string {
@@ -32,6 +33,7 @@ export function createRoomRouter(options: {
   authenticate?: RequestHandler;
   consentVersion?: string;
   now?: () => Date;
+  onSessionState?: (snapshot: RoomSnapshot) => void;
 }) {
   const router = Router();
   const authenticate = options.authenticate ?? authenticateMember1;
@@ -94,6 +96,7 @@ export function createRoomRouter(options: {
     const snapshot = await options.service.startRoom(
       pathUuid(req.params.roomId), authenticatedUserId(res), consentVersion, now(),
     );
+    options.onSessionState?.(snapshot);
     res.status(200).json(snapshot);
   });
 
@@ -101,6 +104,7 @@ export function createRoomRouter(options: {
     const snapshot = await options.service.finishSession(
       pathUuid(req.params.sessionId), authenticatedUserId(res), now(),
     );
+    options.onSessionState?.(snapshot);
     res.status(200).json(snapshot);
   });
 

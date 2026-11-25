@@ -1,6 +1,4 @@
-# Optional CPU runtime; requires a separately reviewed model directory.
-# Do not enable for public speech until Member 4 supplies the authenticated
-# adapter and pins/tests the complete inference dependency/model combination.
+# Optional private CPU runtime. Review the model and resolved Python dependencies before deployment.
 FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*

@@ -1,22 +1,30 @@
-# Member 4 — Weeks 2–3 implementation evidence
+# Member 4 Weeks 2–3 implementation evidence
 
-Status: partial implementation; not acceptance sign-off. Source: Week 1 draft, SRS FR-14–20 and AT-05/06, current session-runtime.ts and room-contracts.ts.
+The backend now connects authenticated LiveKit microphone tracks to WhisperLiveKit 0.2.26. Two-speaker routing, live delivery, reconnect, and provider-failure checks passed against real LiveKit and PostgreSQL. Recognition accuracy and latency with a provisioned Whisper model remain open.
 
-## Implemented
-- backend/src/transcription-adapter.ts: transport-independent per-track PCM16 adapter; separate recognizer per track, membership binding, microphone filtering, cancellation signal, provider failure flag.
-- backend/src/transcript-buffer.ts: server-owned attribution, strict recognition shape, revision rules, 1 MiB UTF-8 text cap, 4096 segment cap, 32 track metadata cap, isolated member snapshots, purge.
-- backend/scripts/*.test.ts: two Member 4 suites.
+## Capture and retention
 
-## Executed evidence
-Node 22.16.0, TypeScript 5.8.3, strict compilation ES2022/NodeNext. Nine cases passed using actual committed test source and an isolated Node assert compatibility runner implementing only the used Vitest functions; official Vitest, full backend typecheck and full repository CI were NOT run. GitHub readback matched tested file blob hashes:
-- buffer 89c0aaf98cc7ea99b8a0de96e7e2c15d5933b2f1
-- buffer tests c7f71e5cd020de6b70eb4d3c17d3036ae5a49842
-- adapter 8f91fb44cdfd4d3312312330cacbfd3918aa7287
-- adapter tests c1d10028131a05b49aa9524f446dfae5133cf046
+- The room controller starts a hidden, subscribe-only RTC participant after the session becomes active. LiveKit account identity and microphone publication metadata bind each track to its canonical speaker. Each track gets an independent mono PCM16, 16 kHz WhisperLiveKit stream.
+- The canonical buffer validates IDs, ranges, track bindings, and revision order. It caps recognized text at 1 MiB UTF-8 and 4,096 segments per session. The application streams provider-final results live. The buffer supports revision-aware consumers and accepts only frozen, complete, attributed final input for the server-side evaluation handoff, with at least 50 recognized words per speaker.
+- Capture stops at finish or expiry. The provider receives a close request and has up to five seconds to drain. Missing track coverage, provider failure, and process restart make capture incomplete. The controller purges the buffer at terminal reconciliation and enforces a five-minute maximum from finish. With no scoring adapter connected, the session records evaluation unavailable.
+- PostgreSQL receives event sequence, capture completion, and lifecycle metadata. The application streams audio and holds transcript text in memory. The Compose ASR service has an internal network, read-only model mount, and disabled container logging. The nginx proxy avoids buffering transcript responses to disk.
 
-## Outstanding integration and risks
-No actual LiveKit RTC subscriber or WhisperLiveKit network recognizer is implemented yet. The injected publication metadata is trustworthy only once the server RTC transport is wired to authenticated LiveKit tracks; do not expose consume() to clients. Current session-runtime.asrToken is server-only; use it. Current room-contracts sessionEventSchema only accepts session.state; coordinate transcript.segment payload and member-only snapshot route with M2/M3. ASR service is isolated on an internal network; coordinate private bridge networking and dependencies with M5. Current adapter assumes cancellation-aware iterator and recognizer; bounded close/drain, hard finish-based expiry, provider timestamps, coverage, unknown attribution display, event publication and end-to-end browser tamper tests remain pending. Track completion conservatively marks capture incomplete; no official evaluation is possible yet. No raw speech or transcript is written by these modules; full-system privacy evidence is pending. Docker unavailable; GitHub clone DNS failed in local environment; dependency install/full tests not possible.
+## Client contract
 
-## Reproduce in repository
-From backend with reviewed lockfile dependencies installed: npx vitest run scripts/transcript-buffer.test.ts scripts/transcription-adapter.test.ts
-Run full npm test and npm run typecheck before integration. Then run real two-participant synthetic speech through actual RTC and ASR, check attribution/revisions, reconnect snapshot authorization, no DB/log persistence, and failure handling. Do not mark Weeks 2/3 done until the required demonstrations pass.
+Connect to `/api/events` with an allowed Origin. Send one frame containing `authorization` and `session_id`, as for existing room events. The server verifies the token and session membership before delivery. Each `transcript.segment` event uses the existing snake_case envelope and a camelCase segment payload. `session.state.payload.session.transcriptStatus` reports live availability without new polling. Apply events by segment ID and revision.
+
+On reconnect, buffer live events while waiting for the first `session.state` event. For an active session, fetch `GET /api/sessions/:sessionId/transcript` with the bearer token. The no-store response contains `sessionId`, `sequence`, `segments`, and a status of `capturing`, `degraded`, or `unavailable`. Replace the local view from this snapshot and apply newer events by sequence and revision. Discard the view on sign-out or terminal session state. The authenticated lobby mounts Member 3’s transcript panel for active sessions. Its client clears on termination, disconnect, page navigation, and authenticated view unmount. The standalone debate demo remains a preview.
+
+Enable the private Compose transcription profile with `WHISPERLIVEKIT_URL=ws://transcription:8000` and a complete, reviewed CTranslate2 model mounted at `/models/model` and readable by the ASR service user. Authenticated deployments also need the existing JWKS issuer, audience, and URL.
+
+## Executed checks
+
+- Backend on Node 24.22.3: clean lockfile install, Prisma generation, type checks, build, and 103 Vitest tests in eight suites.
+- Frontend: clean install, type checks, build, and 25 Vitest tests in six suites. The locked tarball mirror was inaccessible to the Linux build. The lockfile now uses the npm registry for those tarballs, preserving their versions and integrity hashes.
+- Real LiveKit and PostgreSQL with signed JWTs and a local JWKS endpoint: two simultaneous synthetic publishers produced independently identifiable PCM streams. A deterministic WebSocket ASR fixture emitted distinct final transcripts. A separate microphone replacement run verified new segments stayed assigned to the original authenticated owner and the capture became incomplete. The authenticated feed and reconnect snapshot attributed both correctly. Nonmembers failed authorization. Transcript mutation via HTTP, finish payload, and WebSocket was rejected. Finish closed the media room, blocked snapshot access, and left the transcript markers out of the test schema dump and API audit records.
+- Real WhisperLiveKit 0.2.26: the private ASR image built successfully and drained PCM as a non-root, read-only container with networking disabled and inference off. Two real RTC streams carrying different synthesized voices passed the PCM and drain protocol check with inference disabled. A separate provider-outage run returned a degraded snapshot, recorded incomplete capture, and ended with evaluation unavailable. An active-session restart produced a degraded capture and discarded old segment IDs. Advancing a fixture session deadline in PostgreSQL exercised the timer reconciliation and terminal cleanup.
+- An isolated Compose stack built the backend and frontend, applied the migrations, and passed API, frontend, LiveKit service, nginx WebSocket, and synthetic log-privacy smoke tests. The backup/restore check restored the durable fixture exactly once and verified the runtime role stayed unprivileged. The sandbox copy of the Postgres init script needed readable permissions for the container user. The test stack used a temporary mount override.
+- Source secret scans and layout checks passed against the branch's current main base. The default CI layout reference predates teammates' frontend reorganization. With that reference corrected for the run, CI reached the backend audit gate and stopped on the Prisma/Effect advisory also present in the original lockfile. The standalone frontend audit reported zero vulnerabilities.
+- Model retrieval from Hugging Face returned HTTP 403 through the managed network. The inference-enabled start failed without local weights. Model-backed recognition, deployment load, and full two-browser media and sign-out acceptance remain unverified. The transcript client tests exercise reconnect, revision merging, terminal handling, page navigation, and unmount. The fixture verifies account-to-track routing. It cannot verify the physical speaker behind a microphone.
+
+Run `npm ci`, `npm run db:generate`, `npm run typecheck`, `npm test`, and `npm run build` in `backend` for the checked-in verification. The provider protocol tests use loopback WebSockets and require no model.

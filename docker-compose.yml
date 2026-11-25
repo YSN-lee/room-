@@ -8,6 +8,11 @@ x-api-env: &api-env
   DATABASE_URL: postgresql://${POSTGRES_APP_USER:-room_app}:${POSTGRES_APP_PASSWORD:?Run python3 backend/scripts/configure-local.py}@postgres:5432/${POSTGRES_DB:-room_db}?schema=public
   LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Run python3 backend/scripts/configure-local.py}
   LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Run python3 backend/scripts/configure-local.py}
+  LIVEKIT_INTERNAL_URL: ${LIVEKIT_INTERNAL_URL:-http://livekit:7880}
+  WHISPERLIVEKIT_URL: ${WHISPERLIVEKIT_URL:-}
+  AUTH_ISSUER: ${AUTH_ISSUER:-}
+  AUTH_AUDIENCE: ${AUTH_AUDIENCE:-}
+  AUTH_JWKS_URL: ${AUTH_JWKS_URL:-}
   LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7883}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
   ENABLE_DEV_MEDIA_TOKENS: ${ENABLE_DEV_MEDIA_TOKENS:-false}
@@ -83,7 +88,7 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
       livekit: {condition: service_healthy}
-    networks: [data, edge, media, outbound]
+    networks: [data, edge, media, outbound, asr]
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -133,14 +138,13 @@ services:
     logging: *logs
     restart: unless-stopped
 
-  # Member 4 still owns the authenticated LiveKit-to-ASR adapter. This service
-  # alone does not produce attributed transcripts or evaluation input.
+  # The backend is the only client on the private ASR network.
   transcription:
     profiles: [transcription]
     build:
       context: ./infra
       dockerfile: WhisperLiveKit.Dockerfile
-    command: ['wlk', '--host', '0.0.0.0', '--port', '8000', '--model', '/models/model', '--backend', 'faster-whisper']
+    command: ['wlk', 'serve', '--host', '0.0.0.0', '--port', '8000', '--model_dir', '/models/model', '--backend-policy', 'localagreement', '--backend', 'faster-whisper', '--pcm-input', '--warmup-file', '', '--log-level', 'WARNING']
     volumes:
       - ${ASR_MODEL_DIR:-./.local/models}:/models:ro
     environment:
@@ -148,7 +152,7 @@ services:
       HF_HUB_DISABLE_TELEMETRY: '1'
     networks: [asr]
     healthcheck:
-      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       start_period: 120s

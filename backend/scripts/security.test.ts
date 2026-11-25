@@ -86,6 +86,13 @@ describe("HTTP security boundary", () => {
 });
 
 describe("media authorization and grants", () => {
+  it("cannot use development grants to impersonate a participant in an official room", async () => {
+    const response = await request(app({ config: { ...config(), allowDevMediaTokens: true } }))
+      .post("/api/rooms/token")
+      .send({ roomName: "room_4c5f92d6-91bb-41ce-bde6-35c8a8187a0d", identity: "spoofed-user" });
+    expect(response.status).toBe(403);
+    expect(response.body.token).toBeUndefined();
+  });
   it("fails closed when authentication/membership integration is absent", async () => {
     const response = await request(app()).post("/api/rooms/token").send(body);
     expect(response.status).toBe(503);

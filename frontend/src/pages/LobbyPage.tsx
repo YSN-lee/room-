@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAuthSession, type AuthSession } from '../lib/auth-session';
 import { roomRequest, type RoomSnapshot } from '../lib/room-api';
+import { LiveTranscript } from '../features/debate-room/LiveTranscript';
 
 export function LobbyPage() {
  const auth = useAuthSession();
@@ -63,6 +64,13 @@ function SignedInLobby({auth}: {auth:AuthSession}) {
  <h2 className="text-2xl font-bold">{room.room.title}</h2><p>{room.room.description}</p><p>{room.room.durationSeconds/60} minutes · {room.session.state}</p>
  {invite && <p>Invite code: <code className="break-all select-all">{invite}</code></p>}
  <ul aria-label="Participants">{[1,2].map(slot=>{const p=room.participants.find(p=>p.slot===slot);return <li key={slot}>Slot {slot}: {p ? `${p.participantId===auth.userId?'You':'Opponent'} — ${p.ready?'Ready':'Not ready'} — ${p.connection}` : 'Waiting for opponent'}</li>;})}</ul>
+ {room.session.state==='active' && <LiveTranscript key={room.session.id}
+   sessionId={room.session.id} accessToken={auth.accessToken}
+   participants={room.participants.map(p => ({
+     id: p.participantId, name: p.participantId === auth.userId ? 'Speaker' : 'Opponent',
+     isYou: p.participantId === auth.userId, connection: p.connection === 'connected' ? 'connected' : 'disconnected',
+     micMuted: false, speaking: false,
+   }))} />}
  {room.session.state==='waiting' && <>
  {creator && <form className="space-y-3 border p-4" onSubmit={e=>{e.preventDefault();void perform(async()=>{apply(await roomRequest<RoomSnapshot>(auth.accessToken,`/rooms/${room.room.id}`,'PATCH',body()));setConsent(false);});}}><h3>Edit topic or duration</h3><button type="button" className="underline" onClick={()=>{setTopic(room.room.title);setDescription(room.room.description??'');setMinutes(room.room.durationSeconds/60);}}>Load current settings</button><fieldset disabled={busy}>{fields}<button className="border px-4 py-2">Save changes</button></fieldset></form>}
  <p>One timed discussion with both microphones available. AI feedback can be wrong. Transcripts are temporary; speech text may be processed by external transcription and AI services. Check the privacy notice before consenting.</p>

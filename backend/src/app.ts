@@ -7,7 +7,7 @@ import { loadSecurityConfig, type SecurityConfig } from "./security-config.js";
 import { AppError, errorHandler, notFound } from "./security-errors.js";
 import { requestContext, securityHeaders, requireJson, validateOrigin } from "./security-http.js";
 import { createRateLimiter } from "./security-rate-limit.js";
-import { mediaTokenRequestSchema, validateBody } from "./security-validation.js";
+import { mediaTokenRequestSchema, uuidSchema, validateBody } from "./security-validation.js";
 import { PrismaClient } from "@prisma/client";
 import { createRoomRouter } from "./room-routes.js";
 import { PrismaRoomLifecycleService, type RoomLifecycleService } from "./room-lifecycle.js";
@@ -71,6 +71,10 @@ export function createApp(options: {
     } else {
       throw new AppError(503, "MEDIA_AUTHORIZATION_UNAVAILABLE");
     }
+    // This legacy token endpoint must never mint identities in a session room.
+    if (media.roomName.startsWith("room_") && uuidSchema.safeParse(media.roomName.slice(5)).success) {
+      throw new AppError(403, "FORBIDDEN");
+    }
     if (!config.livekitApiKey || !config.livekitApiSecret) {
       throw new AppError(503, "SERVICE_UNAVAILABLE");
     }
@@ -98,6 +102,7 @@ export function createApp(options: {
     authenticate: options.authenticateUser,
     consentVersion: options.consentVersion,
     now: options.now,
+    onSessionState: app.locals.sessionRuntime?.onSessionState,
   }));
   app.use(notFound);
   app.use(errorHandler);

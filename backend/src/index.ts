@@ -15,6 +15,7 @@ server.headersTimeout = 10_000;
 server.keepAliveTimeout = 5_000;
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
+    app.locals.sessionRuntime?.shutdown();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 10_000).unref();
   });

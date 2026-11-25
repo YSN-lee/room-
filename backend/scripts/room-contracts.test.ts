@@ -22,6 +22,18 @@ describe('room wire contracts', () => {
    expect(sessionEventSchema.safeParse({ ...event, session_id: 'c78a7115-7272-4055-98d9-b30235f09980' }).success).toBe(false);
    expect(sessionEventSchema.safeParse({ ...event, payload: { ...snapshot, participants: Array(3).fill(snapshot.participants[0]) } }).success).toBe(false);
  });
+ it('validates attributed transcript events on the existing sequence envelope', () => {
+   const segment = {
+     sessionId: id, segmentId: id, participantId: id, revision: 0, startMs: 24, endMs: 40,
+     isFinal: true, text: 'Example', attributionStatus: 'verified',
+   };
+   const transcript = { ...event, type: 'transcript.segment', payload: segment };
+   expect(sessionEventSchema.safeParse(transcript).success).toBe(true);
+   for (const payload of [{ ...segment, endMs: 0 }, { ...segment, speaker: 'forged' },
+     { ...segment, sessionId: 'c78a7115-7272-4055-98d9-b30235f09980' }]) {
+     expect(sessionEventSchema.safeParse({ ...transcript, payload }).success).toBe(false);
+   }
+ });
  it('keeps evaluation states and phases out of session state', () => {
    for (const state of ['processing', 'completed', 'solo', 'open']) expect(sessionStateSchema.safeParse(state).success).toBe(false);
    for (const reason of ['timer', 'user_end', 'disconnect', 'service_failure']) expect(endReasonSchema.safeParse(reason).success).toBe(true);

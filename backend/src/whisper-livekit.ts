@@ -3,6 +3,8 @@ import WebSocket from 'ws';
 import { z } from 'zod';
 import type { OpenRecognizer } from './transcription-adapter.js';
 
+const TIMESTAMP_TOLERANCE_MS = 100;
+
 const result = z.object({
   type: z.literal('Results'),
   start: z.number().nonnegative(),
@@ -75,10 +77,12 @@ export function whisperLiveKit(base: string): OpenRecognizer {
         const payload = result.parse(message);
         const words = payload.channel.alternatives[0].transcript.trim();
         if (!words) return;
-        const startMs = Math.round(payload.start * 1000);
+        const reportedStart = Math.round(payload.start * 1000);
         const endMs = Math.round((payload.start + payload.duration) * 1000);
-        // Whisper timestamps can round beyond the last PCM frame by a few milliseconds.
-        if (startMs < lastEnd || endMs > audioMs + 100 || startMs > audioMs) throw new Error();
+        // LocalAgreement can shift a newly committed word back across the previous boundary.
+        if (reportedStart < lastEnd - TIMESTAMP_TOLERANCE_MS || endMs < lastEnd ||
+            endMs > audioMs + TIMESTAMP_TOLERANCE_MS || reportedStart > audioMs) throw new Error();
+        const startMs = Math.max(lastEnd, reportedStart);
         lastEnd = Math.min(endMs, Math.floor(audioMs));
         receive({ segmentId: randomUUID(), revision: 0, startMs, endMs: lastEnd, text: words, isFinal: true });
       } catch {

@@ -1,6 +1,6 @@
 # Member 4 Weeks 2–3 implementation evidence
 
-The backend now connects authenticated LiveKit microphone tracks to WhisperLiveKit 0.2.26. Two-speaker routing, live delivery, reconnect, and provider-failure checks passed against real LiveKit and PostgreSQL. Recognition accuracy and latency with a provisioned Whisper model remain open.
+The backend now connects authenticated LiveKit microphone tracks to WhisperLiveKit 0.2.26. Two-speaker routing, live delivery, reconnect, and provider-failure checks passed against real LiveKit and PostgreSQL. The follow-up below records a successful model-backed two-speaker run. Production recognition accuracy and latency remain open.
 
 ## Capture and retention
 
@@ -17,7 +17,7 @@ On reconnect, buffer live events while waiting for the first `session.state` eve
 
 Enable the private Compose transcription profile with `WHISPERLIVEKIT_URL=ws://transcription:8000` and a complete, reviewed CTranslate2 model mounted at `/models/model` and readable by the ASR service user. Authenticated deployments also need the existing JWKS issuer, audience, and URL.
 
-## Executed checks
+## Initial review checks
 
 - Backend on Node 24.22.3: clean lockfile install, Prisma generation, type checks, build, and 103 Vitest tests in eight suites.
 - Frontend: clean install, type checks, build, and 25 Vitest tests in six suites. The locked tarball mirror was inaccessible to the Linux build. The lockfile now uses the npm registry for those tarballs, preserving their versions and integrity hashes.
@@ -28,3 +28,40 @@ Enable the private Compose transcription profile with `WHISPERLIVEKIT_URL=ws://t
 - Model retrieval from Hugging Face returned HTTP 403 through the managed network. The inference-enabled start failed without local weights. Model-backed recognition, deployment load, and full two-browser media and sign-out acceptance remain unverified. The transcript client tests exercise reconnect, revision merging, terminal handling, page navigation, and unmount. The fixture verifies account-to-track routing. It cannot verify the physical speaker behind a microphone.
 
 Run `npm ci`, `npm run db:generate`, `npm run typecheck`, `npm test`, and `npm run build` in `backend` for the checked-in verification. The provider protocol tests use loopback WebSockets and require no model.
+
+## Model-backed follow-up
+
+### Provisioning
+
+The acceptance model is SYSTRAN’s MIT-licensed `faster-whisper-tiny.en`, a CTranslate2 conversion of OpenAI Whisper Tiny English. The upstream revision is `0d3d19a32d3338f10357c0889762bd8d64bbdeba`. Keep the model outside Git.
+
+On a machine with access to Hugging Face, download the four files from the pinned revision using normal TLS verification:
+
+```sh
+hf download Systran/faster-whisper-tiny.en config.json model.bin tokenizer.json vocabulary.txt \
+  --revision 0d3d19a32d3338f10357c0889762bd8d64bbdeba --local-dir /path/to/download
+mkdir -p .local/models/model
+install -m 0444 /path/to/download/{config.json,model.bin,tokenizer.json,vocabulary.txt} .local/models/model/
+bash backend/scripts/verify-whisper-model.sh .local/models/model
+```
+
+The verifier uses GNU `sha256sum` and expects a directory containing exactly those four regular files. It checks all four digests. Use the read-only model mount, private ASR network, offline mode, and log settings already provided by the Compose transcription profile. Keep `WHISPERLIVEKIT_URL=ws://transcription:8000` configured for that profile. The upstream model repository publishes the weight digest. The support-file digests pin the bytes used during this acceptance run. [Pinned model and upstream weight digest](https://huggingface.co/Systran/faster-whisper-tiny.en/blob/0d3d19a32d3338f10357c0889762bd8d64bbdeba/model.bin)
+
+The managed instance declined the scoped Hugging Face network change. For this synthetic run, the four regular files came from the `faster-tiny.en.7z` release asset below. The archive SHA-256 was `4723bd8ce0a714154210ec234567f305b62a0f6af174ccee26cdbd47b0ac843c`. The extracted `model.bin` matched the independently published SYSTRAN digest. The verifier accepted the four-file bundle and rejected a modified tokenizer and an extra preprocessor configuration. Use the upstream revision for deployment and have Member 5 review any alternate distribution source. [Release asset](https://github.com/jianchang512/stt/releases/download/0.0/faster-tiny.en.7z)
+
+OpenAI’s separate `tiny.en.pt` checkpoint also matched the publisher’s SHA-256 and loaded offline with PyTorch weights-only loading. WhisperLiveKit 0.2.26’s shared PyTorch backend hit a word-alignment tensor shape error under two concurrent streams. Keep the configured Faster Whisper backend for concurrent capture. [OpenAI checkpoint digests](https://github.com/openai/whisper/blob/main/whisper/__init__.py)
+
+### Interim and dependency checks
+
+A direct model-backed provider probe returned interim text with zero-duration ranges, followed by a final with a start time over two seconds earlier. It also produced adjacent final ranges ending at 640 ms and starting at 620 ms. The ROOM transport now clamps a small overlap at the previous final boundary and keeps both texts. A regression test reproduces those exact ranges.
+
+Keep the deployed feed final-only until Members 2 and 3 agree on how to replace provisional timestamps, withdraw empty hypotheses, and reconcile a finalized prefix with a remaining provisional tail. The existing canonical revision rules and panel reconciliation still pass. End-to-end interim delivery remains open.
+
+The advisory fix pins Effect 3.22.5 only beneath `@prisma/config`, with Prisma still at 6.19.3. Clean installation, Prisma generation, type checks, builds, the backend suite, and both npm audits passed. Member 5 can review the narrow override as part of release sign-off.
+
+### Acceptance results and owner handoff
+
+- Two synthesized voices entered real LiveKit as separate microphone tracks. WhisperLiveKit 0.2.26 used the verified CTranslate2 weights and Faster Whisper backend on CPU. The actual transcript included “The library has lots of books” for the first authenticated owner and “City parks are open to everyone” for the second. The harness found each expected marker only on its own track. Word substitutions appeared in other repetitions, so this establishes recognition and attribution for the fixture. It leaves accuracy and latency targets open.
+- The real model-backed API run passed participant snapshots, nonmember rejection, HTTP and WebSocket tamper rejection, and terminal media cleanup. It blocked transcript reads after finish and found no phrase markers in the synthetic test database dump or API audit records.
+- Two Chrome tabs using separate synthetic principals displayed the same model-backed transcript with the appropriate speaker labels. The first tab cleared on its fixture sign-out action. The second tab cleared on a real finish request. The fixture mounted auth in memory and used native RTC publishers. Member 1 still needs to supply production sign-in and shared sign-out behavior. Members 2 and 3 need to run the complete browser microphone, reconnect, and cross-tab cleanup flow with those production entry points.
+- The backend suite passed 104 tests across eight files. The frontend suite passed 25 tests across six files. Both type checks and builds passed. The repository CI check passed with the current layout base `cb8bec8`; both npm audits reported zero vulnerabilities.

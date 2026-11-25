@@ -50,6 +50,34 @@ describe('WhisperLiveKit streaming transport', () => {
     expect(failed).not.toHaveBeenCalled();
   }));
 
+  it('keeps both finals when LocalAgreement overlaps adjacent word boundaries', () => withProvider(async (server, url) => {
+    const received = vi.fn();
+    const failed = vi.fn();
+    server.on('connection', ws => {
+      ws.send(JSON.stringify({ type: 'Metadata', duration: 0 }));
+      ws.on('message', (_data, binary) => {
+        if (binary) return;
+        for (const [start, duration, transcript] of [[0, 0.64, 'City'], [0.62, 1.68, 'parks are open to everyone.']]) {
+          ws.send(JSON.stringify({
+            type: 'Results', start, duration, is_final: true, channel: { alternatives: [{ transcript }] },
+          }));
+        }
+        ws.send(JSON.stringify({ type: 'Metadata', duration: 3 }));
+        ws.close(1000);
+      });
+    });
+    const stream = await whisperLiveKit(url)(received, new AbortController().signal, failed);
+    for (let frame = 0; frame < 150; frame++) {
+      await stream.write(Buffer.alloc(640));
+      if (frame % 25 === 24) await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    await stream.close();
+    expect(received.mock.calls.map(([line]) => [line.startMs, line.endMs, line.text])).toEqual([
+      [0, 640, 'City'], [640, 2300, 'parks are open to everyone.'],
+    ]);
+    expect(failed).not.toHaveBeenCalled();
+  }));
+
   it('marks a normal transport close without the processed-audio summary as a failed drain', () => withProvider(async (server, url) => {
     const failed = vi.fn();
     server.on('connection', ws => {

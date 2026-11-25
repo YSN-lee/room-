@@ -48,6 +48,9 @@
     "node": ">=22.12.0 <25"
   },
   "overrides": {
-    "deepmerge-ts": "8.0.2"
+    "deepmerge-ts": "8.0.2",
+    "@prisma/config": {
+      "effect": "3.22.5"
+    }
   }
 }
